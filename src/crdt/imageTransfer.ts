@@ -37,6 +37,7 @@ export class ImageTransfer {
   private unsubscribeStore: (() => void) | null = null
   private unsubscribeCanvas: (() => void) | null = null
   private started = false
+  private destroyed = false
 
   constructor(canvas: Canvas, store: ImageStore) {
     this.canvas = canvas
@@ -46,6 +47,7 @@ export class ImageTransfer {
       const message = event.data
       if (message?.kind === 'image') {
         this.inFlight.delete(message.imageId)
+        if (import.meta.env.DEV) console.debug(`[img-sync] bc image received ${message.imageId}`)
         void this.store.put(message.imageId, message.blob, message.mimeType)
       } else if (message?.kind === 'have') {
         for (const imageId of message.ids as string[]) {
@@ -60,6 +62,7 @@ export class ImageTransfer {
   start(): void {
     if (this.started) return
     this.started = true
+    this.destroyed = false
     this.sync.on('peers', this.handlePeers)
     this.unsubscribeStore = this.store.subscribeAll((imageId) => {
       void this.handleLocalImageStored(imageId)
@@ -73,6 +76,7 @@ export class ImageTransfer {
   destroy(): void {
     if (!this.started) return
     this.started = false
+    this.destroyed = true
     this.sync.off('peers', this.handlePeers)
     this.unsubscribeStore?.()
     this.unsubscribeCanvas?.()
@@ -81,6 +85,15 @@ export class ImageTransfer {
     this.assembling.clear()
     this.inFlight.clear()
     this.bc.close()
+  }
+
+  private postToBc(message: unknown): void {
+    if (this.destroyed) return
+    try {
+      this.bc.postMessage(message)
+    } catch {
+      // channel closed during unmount — nothing to do
+    }
   }
 
   private readonly handlePeers = (): void => {
@@ -124,20 +137,33 @@ export class ImageTransfer {
       }
       if (typeof originalOnMessage === 'function') originalOnMessage.call(channel, event)
     }
-    void this.advertiseTo(remoteId)
+    // Slight delay: both ends wrap their channel on their own 'connect' event, which can
+    // fire a few ms apart. Sending HAVE before the remote has wrapped lets a 0x69 frame
+    // slip into y-webrtc's parser (harmless console.error + empty echo, but noisy).
+    setTimeout(() => {
+      if (!this.destroyed) void this.advertiseTo(remoteId)
+    }, 100)
   }
 
   private teardownPeer(remoteId: string): void {
     this.peerChannels.delete(remoteId)
+    let partialCount = 0
     for (const [imageId, state] of [...this.assembling]) {
       if (state.remoteId === remoteId) {
         this.assembling.delete(imageId)
         this.inFlight.delete(imageId)
+        partialCount++
       }
     }
     for (const imageId of [...this.inFlight]) {
       if (!this.assembling.has(imageId)) this.inFlight.delete(imageId)
     }
+    if (import.meta.env.DEV) {
+      console.debug(
+        `[img-sync] peer ${remoteId} disconnected — cleared ${partialCount} partial transfer${partialCount === 1 ? '' : 's'}; re-scanning for pending images`,
+      )
+    }
+    this.scheduleScan()
   }
 
   private async maybeRequestFromBc(imageId: string): Promise<void> {
@@ -145,24 +171,24 @@ export class ImageTransfer {
     const existing = await this.store.get(imageId)
     if (existing) return
     this.inFlight.add(imageId)
-    this.bc.postMessage({ kind: 'request', imageId })
+    this.postToBc({ kind: 'request', imageId })
   }
 
   private async respondToBc(imageId: string): Promise<void> {
     const record = await this.store.get(imageId)
     if (!record) return
-    this.bc.postMessage({ kind: 'image', imageId, mimeType: record.mimeType, blob: record.blob })
+    this.postToBc({ kind: 'image', imageId, mimeType: record.mimeType, blob: record.blob })
   }
 
   private async broadcastHaveToBc(): Promise<void> {
     const ids = await this.store.listIds()
-    if (ids.length > 0) this.bc.postMessage({ kind: 'have', ids })
+    if (ids.length > 0) this.postToBc({ kind: 'have', ids })
   }
 
   private async handleLocalImageStored(imageId: string): Promise<void> {
     const record = await this.store.get(imageId)
     if (!record) return
-    this.bc.postMessage({ kind: 'image', imageId, mimeType: record.mimeType, blob: record.blob })
+    this.postToBc({ kind: 'image', imageId, mimeType: record.mimeType, blob: record.blob })
     this.broadcastJson(KIND_HAVE, { ids: [imageId] })
   }
 
@@ -191,6 +217,11 @@ export class ImageTransfer {
       this.inFlight.delete(imageId)
       return
     }
+    if (import.meta.env.DEV) {
+      console.debug(
+        `[img-sync] request sent for ${imageId} (${this.peerChannels.size} peer channel${this.peerChannels.size === 1 ? '' : 's'})`,
+      )
+    }
     this.broadcastJson(KIND_REQUEST, { imageId })
   }
 
@@ -198,6 +229,7 @@ export class ImageTransfer {
     const kind = buf[1]
     if (kind === KIND_HAVE) {
       const { ids } = JSON.parse(textDecoder.decode(buf.subarray(2))) as { ids: string[] }
+      if (import.meta.env.DEV) console.debug(`[img-sync] have received: ${ids.join(', ')}`)
       for (const imageId of ids) {
         const existing = await this.store.get(imageId)
         if (!existing && !this.inFlight.has(imageId)) {
@@ -210,6 +242,7 @@ export class ImageTransfer {
     if (kind === KIND_REQUEST) {
       const { imageId } = JSON.parse(textDecoder.decode(buf.subarray(2))) as { imageId: string }
       const record = await this.store.get(imageId)
+      if (import.meta.env.DEV && record) console.debug(`[img-sync] request received for ${imageId} — sending`)
       if (record) await this.sendImage(remoteId, record)
       return
     }
@@ -218,6 +251,9 @@ export class ImageTransfer {
         imageId: string
         mimeType: string
         total: number
+      }
+      if (import.meta.env.DEV) {
+        console.debug(`[img-sync] meta received ${imageId} · ${total} chunks expected · ${mimeType}`)
       }
       this.assembling.set(imageId, { remoteId, mimeType, total, parts: new Map(), received: 0 })
       return
@@ -237,6 +273,11 @@ export class ImageTransfer {
           .sort((a, b) => a[0] - b[0])
           .map(([, part]) => part)
         const blob = new Blob(parts as BlobPart[], { type: state.mimeType })
+        if (import.meta.env.DEV) {
+          console.debug(
+            `[img-sync] assembled ${imageId} · ${state.received} chunks · ${blob.size} bytes stored`,
+          )
+        }
         await this.store.put(imageId, blob, state.mimeType)
       }
     }
@@ -280,6 +321,11 @@ export class ImageTransfer {
   ): Promise<boolean> {
     if (channel.readyState !== 'open') return false
     if (channel.bufferedAmount + frame.byteLength > BUFFER_LOW_THRESHOLD) {
+      if (import.meta.env.DEV) {
+        console.debug(
+          `[img-sync] backpressure wait (bufferedAmount ${channel.bufferedAmount} bytes)`,
+        )
+      }
       await this.waitForBufferedLow(channel)
     }
     try {
