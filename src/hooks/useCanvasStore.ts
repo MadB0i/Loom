@@ -1,22 +1,22 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { Note } from '../crdt/note'
-import { NotesStore, type NoteSummary } from '../crdt/notesStore'
+import type { Canvas } from '../crdt/canvas'
+import { CanvasStore, type CanvasSummary } from '../crdt/canvasStore'
 
-const EMPTY: NoteSummary[] = []
+const EMPTY: CanvasSummary[] = []
 
-export interface NotesStoreApi {
+export interface CanvasStoreApi {
   synced: boolean
-  notes: NoteSummary[]
+  canvases: CanvasSummary[]
   activeId: string | null
-  activeNote: Note | null
+  activeCanvas: Canvas | null
   select: (id: string) => void
-  createNote: () => void
-  deleteNote: (id: string) => void
+  createCanvas: () => void
+  deleteCanvas: (id: string) => void
   updateMeta: (id: string, meta: { title: string; snippet: string }) => void
 }
 
-export function useNotesStore(store: NotesStore | null): NotesStoreApi {
-  const notes = useSyncExternalStore(
+export function useCanvasStore(store: CanvasStore | null): CanvasStoreApi {
+  const canvases = useSyncExternalStore(
     (onChange) => (store ? store.subscribe(onChange) : () => {}),
     () => (store ? store.getSnapshot() : EMPTY),
   )
@@ -34,27 +34,36 @@ export function useNotesStore(store: NotesStore | null): NotesStoreApi {
     return store.subscribe(() => setSynced(store.synced))
   }, [store])
 
-  const activeId = selectedId ?? notes[0]?.id ?? null
-  const activeNote = activeId ? (store?.getNote(activeId) ?? null) : null
+  const activeId = selectedId ?? canvases[0]?.id ?? null
+  const activeCanvas = activeId ? (store?.getCanvas(activeId) ?? null) : null
 
   const select = (id: string) => setSelectedId(id)
 
-  const createNote = () => {
+  const createCanvas = () => {
     if (!store) return
-    const id = store.createNote()
+    const id = store.createCanvas()
     setSelectedId(id)
   }
 
-  const deleteNote = (id: string) => {
+  const deleteCanvas = (id: string) => {
     if (!store) return
-    if (!window.confirm('Delete this note?')) return
+    if (!window.confirm('Delete this canvas?')) return
     if (selectedIdRef.current === id) setSelectedId(null)
-    store.deleteNote(id)
+    store.deleteCanvas(id)
   }
 
   const updateMeta = (id: string, meta: { title: string; snippet: string }) => {
     store?.updateMeta(id, meta)
   }
 
-  return { synced, notes, activeId, activeNote, select, createNote, deleteNote, updateMeta }
+  return {
+    synced,
+    canvases,
+    activeId,
+    activeCanvas,
+    select,
+    createCanvas,
+    deleteCanvas,
+    updateMeta,
+  }
 }

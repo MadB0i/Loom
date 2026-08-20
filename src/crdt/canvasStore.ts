@@ -1,38 +1,38 @@
 import * as Y from 'yjs'
 import { IndexeddbPersistence, clearDocument } from 'y-indexeddb'
 import { WebrtcProvider } from 'y-webrtc'
-import { Note } from './note'
+import { Canvas } from './canvas'
 
-export const NOTES_INDEX_DB = 'loom-notes-index'
-export const NOTES_INDEX_ROOM = 'loom-notes-index'
+export const CANVAS_INDEX_DB = 'loom-canvases-index'
+export const CANVAS_INDEX_ROOM = 'loom-canvases-index'
 
-export interface NoteMeta {
+export interface CanvasMeta {
   title: string
   snippet: string
   createdAt: number
   updatedAt: number
 }
 
-export interface NoteSummary extends NoteMeta {
+export interface CanvasSummary extends CanvasMeta {
   id: string
 }
 
-export class NotesStore {
+export class CanvasStore {
   readonly doc: Y.Doc
-  readonly meta: Y.Map<NoteMeta>
+  readonly meta: Y.Map<CanvasMeta>
   readonly persistence: IndexeddbPersistence
   readonly sync: WebrtcProvider
 
   private readonly listeners = new Set<() => void>()
-  private readonly loadedNotes = new Map<string, Note>()
-  private snapshot: NoteSummary[] = []
+  private readonly loadedCanvases = new Map<string, Canvas>()
+  private snapshot: CanvasSummary[] = []
   private destroyed = false
 
   constructor() {
     this.doc = new Y.Doc()
-    this.meta = this.doc.getMap<NoteMeta>('notes')
-    this.persistence = new IndexeddbPersistence(NOTES_INDEX_DB, this.doc)
-    this.sync = new WebrtcProvider(NOTES_INDEX_ROOM, this.doc)
+    this.meta = this.doc.getMap<CanvasMeta>('canvases')
+    this.persistence = new IndexeddbPersistence(CANVAS_INDEX_DB, this.doc)
+    this.sync = new WebrtcProvider(CANVAS_INDEX_ROOM, this.doc)
     this.meta.observe(this.handleMetaChange)
     this.persistence.on('synced', () => this.refreshSnapshot())
     this.refreshSnapshot()
@@ -49,36 +49,36 @@ export class NotesStore {
     }
   }
 
-  getSnapshot(): NoteSummary[] {
+  getSnapshot(): CanvasSummary[] {
     return this.snapshot
   }
 
-  createNote(): string {
+  createCanvas(): string {
     const id = crypto.randomUUID()
     const now = Date.now()
     this.meta.set(id, { title: '', snippet: '', createdAt: now, updatedAt: now })
     return id
   }
 
-  getNote(id: string): Note {
-    let note = this.loadedNotes.get(id)
-    if (!note) {
-      note = new Note(id)
-      this.loadedNotes.set(id, note)
+  getCanvas(id: string): Canvas {
+    let canvas = this.loadedCanvases.get(id)
+    if (!canvas) {
+      canvas = new Canvas(id)
+      this.loadedCanvases.set(id, canvas)
     }
-    return note
+    return canvas
   }
 
-  updateMeta(id: string, patch: Pick<NoteMeta, 'title' | 'snippet'>): void {
+  updateMeta(id: string, patch: Pick<CanvasMeta, 'title' | 'snippet'>): void {
     const current = this.meta.get(id)
     if (!current) return
     this.meta.set(id, { ...current, ...patch, updatedAt: Date.now() })
   }
 
-  deleteNote(id: string): void {
+  deleteCanvas(id: string): void {
     if (!this.meta.has(id)) return
     this.meta.delete(id)
-    this.unloadNote(id)
+    this.unloadCanvas(id)
   }
 
   destroy(): void {
@@ -87,16 +87,16 @@ export class NotesStore {
     this.meta.unobserve(this.handleMetaChange)
     this.sync.destroy()
     this.persistence.destroy()
-    for (const note of this.loadedNotes.values()) note.destroy()
-    this.loadedNotes.clear()
+    for (const canvas of this.loadedCanvases.values()) canvas.destroy()
+    this.loadedCanvases.clear()
     this.doc.destroy()
   }
 
   private readonly handleMetaChange = (): void => {
-    for (const [id, note] of this.loadedNotes) {
+    for (const [id, canvas] of this.loadedCanvases) {
       if (!this.meta.has(id)) {
-        this.loadedNotes.delete(id)
-        note.destroy()
+        this.loadedCanvases.delete(id)
+        canvas.destroy()
         void clearDocument(id)
       }
     }
@@ -110,11 +110,11 @@ export class NotesStore {
     for (const listener of this.listeners) listener()
   }
 
-  private unloadNote(id: string): void {
-    const note = this.loadedNotes.get(id)
-    if (note) {
-      this.loadedNotes.delete(id)
-      note.destroy()
+  private unloadCanvas(id: string): void {
+    const canvas = this.loadedCanvases.get(id)
+    if (canvas) {
+      this.loadedCanvases.delete(id)
+      canvas.destroy()
     }
     void clearDocument(id)
   }
