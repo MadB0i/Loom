@@ -1,12 +1,14 @@
 import { useEffect, useRef } from 'react'
 import { X } from 'lucide-react'
 import { useTransformContext } from 'react-zoom-pan-pinch'
-import type { Canvas, ElementData } from '../crdt/canvas'
+import type { Canvas, TextElementData } from '../crdt/canvas'
+import type { Tool } from './CanvasEditor'
 
 interface TextBlockProps {
   canvas: Canvas
-  element: ElementData
+  element: TextElementData
   editing: boolean
+  tool: Tool
   onRequestEdit: (id: string) => void
   onStopEdit: () => void
 }
@@ -23,6 +25,7 @@ export function TextBlock({
   canvas,
   element,
   editing,
+  tool,
   onRequestEdit,
   onStopEdit,
 }: TextBlockProps) {
@@ -35,7 +38,7 @@ export function TextBlock({
   }, [editing])
 
   const handlePointerDown = (event: React.PointerEvent) => {
-    if (editing) return
+    if (editing || tool === 'draw') return
     event.stopPropagation()
     event.preventDefault()
     dragRef.current = {
@@ -75,7 +78,7 @@ export function TextBlock({
   return (
     <div
       className={`group absolute left-0 top-0 select-none ${
-        editing ? 'cursor-text' : 'cursor-grab active:cursor-grabbing'
+        editing ? 'cursor-text' : tool === 'draw' ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'
       }`}
       style={{ transform: `translate(${element.x}px, ${element.y}px)` }}
       onPointerDown={handlePointerDown}
