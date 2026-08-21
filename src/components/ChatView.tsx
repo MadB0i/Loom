@@ -1,12 +1,21 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { Paperclip, SendHorizontal, Users } from 'lucide-react'
+import { motion } from 'framer-motion'
+import { Paperclip, PenLine, SendHorizontal } from 'lucide-react'
 import type { Conversation } from '../crdt/conversation'
 import { imageStore } from '../crdt/imageStore'
 import { ImageTransfer } from '../crdt/imageTransfer'
 import type { ConversationStore } from '../crdt/conversationStore'
 import type { Identity } from '../identity/identity'
 import { Avatar } from './Avatar'
+import { ConversationCanvas } from './ConversationCanvas'
 import { MessageBubble } from './MessageBubble'
+
+type ConversationView = 'messages' | 'canvas'
+
+const VIEW_TABS: { id: ConversationView; label: string; icon: typeof PenLine }[] = [
+  { id: 'messages', label: 'Messages', icon: SendHorizontal },
+  { id: 'canvas', label: 'Canvas', icon: PenLine },
+]
 
 interface ChatViewProps {
   conversation: Conversation
@@ -20,6 +29,7 @@ export function ChatView({ conversation, store, identity }: ChatViewProps) {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot)
 
   const [draft, setDraft] = useState('')
+  const [view, setView] = useState<ConversationView>('messages')
   const listRef = useRef<HTMLDivElement>(null)
   const attachInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
@@ -60,6 +70,7 @@ export function ChatView({ conversation, store, identity }: ChatViewProps) {
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
+      if (view !== 'messages') return
       const item = Array.from(event.clipboardData?.items ?? []).find((entry) =>
         entry.type.startsWith('image/'),
       )
@@ -70,7 +81,7 @@ export function ChatView({ conversation, store, identity }: ChatViewProps) {
     }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
-  }, [sendImage])
+  }, [sendImage, view])
 
   const memberCount = Object.keys(snapshot.members).length
   const title = snapshot.name || 'Untitled chat'
@@ -85,18 +96,40 @@ export function ChatView({ conversation, store, identity }: ChatViewProps) {
             {snapshot.isGroup ? `${memberCount} ${memberCount === 1 ? 'member' : 'members'}` : 'Local-only · test mode'}
           </div>
         </div>
-        <button
-          type="button"
-          disabled
-          title="Coming soon — peer pairing arrives in Phase 9"
-          aria-label="Add participant (coming soon)"
-          className="flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-xs font-medium text-text-faint"
+        <div
+          className="flex items-center gap-0.5 rounded-lg bg-black/25 p-0.5"
+          role="tablist"
+          aria-label="Conversation view"
         >
-          <Users size={13} />
-          Add participant
-        </button>
+          {VIEW_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={view === tab.id}
+              onClick={() => setView(tab.id)}
+              className={`relative flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition ${
+                view === tab.id ? 'text-white' : 'text-text-muted hover:text-text'
+              }`}
+            >
+              {view === tab.id && (
+                <motion.span
+                  layoutId="conversation-view-pill"
+                  className="absolute inset-0 rounded-md bg-accent shadow-md"
+                  transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                />
+              )}
+              <tab.icon size={12} className="relative z-10" />
+              <span className="relative z-10">{tab.label}</span>
+            </button>
+          ))}
+        </div>
       </header>
-      <div
+      {view === 'canvas' ? (
+        <ConversationCanvas conversation={conversation} />
+      ) : (
+        <>
+          <div
         ref={listRef}
         className={`flex-1 overflow-y-auto px-6 py-4 transition ${
           dragging ? 'ring-1 ring-inset ring-accent/50' : ''
@@ -182,6 +215,8 @@ export function ChatView({ conversation, store, identity }: ChatViewProps) {
           </button>
         </div>
       </div>
+        </>
+      )}
     </div>
   )
 }

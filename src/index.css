@@ -12,6 +12,9 @@
   --color-border: #26262e;
   --color-border-soft: #1e1e24;
 
+  /* Canvas dot-grid — static, cheap (no animation) */
+  --color-grid-dot: #26262e;
+
   /* Accent — electric violet, used sparingly */
   --color-accent: #7c5cff;
   --color-accent-soft: #7c5cff1f;
