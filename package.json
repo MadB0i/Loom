@@ -1,6 +1,6 @@
 {
   "name": "loom-notes",
-  "description": "Local-first note app that syncs across devices in real time, with zero central database. Built on CRDTs (Yjs).",
+  "description": "Local-first P2P messenger that syncs across devices in real time, with zero central database. Built on CRDTs (Yjs).",
   "private": true,
   "version": "0.0.0",
   "type": "module",

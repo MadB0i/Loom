@@ -15,14 +15,13 @@
   /* Accent — electric violet, used sparingly */
   --color-accent: #7c5cff;
   --color-accent-soft: #7c5cff1f;
+  --color-accent-blue: #4d9fff;
+  --color-accent-pink: #f472b6;
 
   /* Text — three-step hierarchy */
   --color-text: #f4f4f5;
   --color-text-muted: #a0a0ab;
   --color-text-faint: #5f5f6b;
-
-  /* Canvas dot grid */
-  --color-grid-dot: #ffffff12;
 }
 
 :root {
@@ -64,4 +63,26 @@ body {
 
 *::-webkit-scrollbar-track {
   background: transparent;
+}
+
+.glass-panel {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(rgba(18, 18, 23, 0.78), rgba(18, 18, 23, 0.78)) padding-box,
+    linear-gradient(
+        135deg,
+        rgba(124, 92, 255, 0.55),
+        rgba(77, 159, 255, 0.32) 45%,
+        rgba(244, 114, 182, 0.28)
+      )
+      border-box;
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+}
+
+.text-gradient {
+  background: linear-gradient(90deg, #b39dff, #7c5cff 30%, #4d9fff 65%, #f472b6);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }

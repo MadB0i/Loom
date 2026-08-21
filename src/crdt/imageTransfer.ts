@@ -1,6 +1,11 @@
 import type { WebrtcProvider } from 'y-webrtc'
-import type { Canvas } from './canvas'
 import type { ImageStore } from './imageStore'
+
+export interface ImageTransferHost {
+  sync: WebrtcProvider
+  getNeededImageIds(): Iterable<string>
+  subscribe(listener: () => void): () => void
+}
 
 const PROTOCOL_TYPE = 0x69 // 'i' — first byte of every Loom image-protocol frame
 const KIND_HAVE = 1
@@ -24,7 +29,7 @@ interface AssemblyState {
 }
 
 export class ImageTransfer {
-  private readonly canvas: Canvas
+  private readonly host: ImageTransferHost
   private readonly sync: WebrtcProvider
   private readonly store: ImageStore
 
@@ -35,13 +40,13 @@ export class ImageTransfer {
 
   private scanTimer: ReturnType<typeof setTimeout> | null = null
   private unsubscribeStore: (() => void) | null = null
-  private unsubscribeCanvas: (() => void) | null = null
+  private unsubscribeHost: (() => void) | null = null
   private started = false
   private destroyed = false
 
-  constructor(canvas: Canvas, store: ImageStore) {
-    this.canvas = canvas
-    this.sync = canvas.sync
+  constructor(host: ImageTransferHost, store: ImageStore) {
+    this.host = host
+    this.sync = host.sync
     this.store = store
     this.bc.onmessage = (event) => {
       const message = event.data
@@ -67,7 +72,7 @@ export class ImageTransfer {
     this.unsubscribeStore = this.store.subscribeAll((imageId) => {
       void this.handleLocalImageStored(imageId)
     })
-    this.unsubscribeCanvas = this.canvas.subscribe(() => this.scheduleScan())
+    this.unsubscribeHost = this.host.subscribe(() => this.scheduleScan())
     this.handlePeers()
     this.scheduleScan()
     void this.broadcastHaveToBc()
@@ -79,7 +84,7 @@ export class ImageTransfer {
     this.destroyed = true
     this.sync.off('peers', this.handlePeers)
     this.unsubscribeStore?.()
-    this.unsubscribeCanvas?.()
+    this.unsubscribeHost?.()
     if (this.scanTimer !== null) clearTimeout(this.scanTimer)
     this.peerChannels.clear()
     this.assembling.clear()
@@ -201,11 +206,7 @@ export class ImageTransfer {
   }
 
   private scanMissingImages(): void {
-    const ids = new Set<string>()
-    for (const element of this.canvas.getSnapshot()) {
-      if (element.type === 'image') ids.add(element.imageId)
-    }
-    for (const imageId of ids) {
+    for (const imageId of this.host.getNeededImageIds()) {
       if (this.inFlight.has(imageId)) continue
       this.inFlight.add(imageId)
       void this.request(imageId)

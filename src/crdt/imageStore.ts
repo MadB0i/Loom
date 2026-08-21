@@ -59,6 +59,16 @@ export class ImageStore {
     })
   }
 
+  async delete(imageId: string): Promise<void> {
+    const db = await this.ensureDb()
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readwrite')
+      transaction.objectStore(STORE_NAME).delete(imageId)
+      transaction.oncomplete = () => resolve()
+      transaction.onerror = () => reject(transaction.error)
+    })
+  }
+
   subscribe(imageId: string, listener: () => void): () => void {
     let listeners = this.subscribers.get(imageId)
     if (!listeners) {
