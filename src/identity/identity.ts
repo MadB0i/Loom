@@ -59,6 +59,68 @@ export async function setAvatarImageId(
   }
 }
 
+export interface PairingPayload {
+  loomId: string
+  publicKey: CryptoKey
+}
+
+export async function exportPublicKeyBase64Url(key: CryptoKey): Promise<string> {
+  const raw = new Uint8Array(await crypto.subtle.exportKey('raw', key))
+  return bytesToBase64Url(raw)
+}
+
+export async function buildPairingCode(identity: Identity): Promise<string> {
+  const key = await exportPublicKeyBase64Url(identity.publicKey)
+  return `loom:v1:${identity.loomId}:${key}`
+}
+
+// Re-derives the Loom ID from the embedded public key; a mismatch means tampering.
+export async function verifyPairingCode(code: string): Promise<PairingPayload> {
+  const parts = code.trim().split(':')
+  if (parts.length !== 4 || parts[0] !== 'loom' || parts[1] !== 'v1') {
+    throw new Error('Not a Loom pairing code')
+  }
+  const [, , claimedId, keyPart] = parts
+  const raw = base64UrlToBytes(keyPart)
+  const publicKey = await importVerifyKey(raw)
+  const derived = await deriveLoomId(publicKey)
+  if (derived !== claimedId) {
+    throw new Error('Code is invalid — key does not match the Loom ID')
+  }
+  return { loomId: claimedId, publicKey }
+}
+
+async function importVerifyKey(raw: Uint8Array<ArrayBuffer>): Promise<CryptoKey> {
+  try {
+    return await crypto.subtle.importKey(
+      'raw',
+      raw,
+      { name: 'Ed25519' } as AlgorithmIdentifier,
+      true,
+      ['verify'],
+    )
+  } catch {
+    return await crypto.subtle.importKey('raw', raw, { name: 'ECDSA', namedCurve: 'P-256' }, true, [
+      'verify',
+    ])
+  }
+}
+
+export function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+export function base64UrlToBytes(text: string): Uint8Array<ArrayBuffer> {
+  const b64 = text.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4)
+  const binary = atob(padded)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}
+
 async function loadOrCreate(): Promise<Identity> {
   const db = await openIdentityDb()
   try {

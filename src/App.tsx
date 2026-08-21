@@ -1,15 +1,20 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Loader2, MessagesSquare, Radar, TriangleAlert } from 'lucide-react'
+import { Loader2, MessagesSquare, QrCode, Radar, TriangleAlert } from 'lucide-react'
+import { invoke } from '@tauri-apps/api/core'
 import { ConversationStore } from './crdt/conversationStore'
 import { cleanupLegacyDatabases } from './crdt/legacyCleanup'
 import { ChatView } from './components/ChatView'
 import { ConnectionStatus } from './components/ConnectionStatus'
 import { ProfileModal } from './components/ProfileModal'
+import { QrPairModal } from './components/QrPairModal'
 import { Sidebar, type SidebarTab } from './components/Sidebar'
 import { useConversations } from './hooks/useConversations'
 import { useIdentity } from './hooks/useIdentity'
+import { useLanPeers, type LanPeer } from './hooks/useLanPeers'
 import type { Identity } from './identity/identity'
+import { isTauri, pushToRust } from './lane/contacts'
+import { initLanSync } from './lane/lanSync'
 
 function StaticWashes() {
   return (
@@ -49,8 +54,15 @@ function EmptyState() {
   )
 }
 
-// PLACEHOLDER: real LAN discovery wiring happens in Phase 9 — see roadmap
-function NearbyPlaceholder() {
+function NearbyView({
+  peers,
+  onOpenPairing,
+  onOpenChatWith,
+}: {
+  peers: LanPeer[]
+  onOpenPairing: () => void
+  onOpenChatWith: (peer: { loomId: string; displayName: string }) => void
+}) {
   return (
     <div className="flex flex-1 items-center justify-center">
       <motion.div
@@ -62,10 +74,50 @@ function NearbyPlaceholder() {
         <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-linear-to-br from-accent to-accent-blue text-white shadow-[0_0_24px_rgba(124,92,255,0.35)]">
           <Radar size={22} />
         </div>
-        <p className="text-sm font-semibold text-text">Find people nearby</p>
-        <p className="max-w-60 text-xs leading-relaxed text-text-faint">
-          Loom will show devices on your network here — coming in the next update.
+        <p className="text-sm font-semibold text-text">
+          {peers.length === 0
+            ? 'Searching your network…'
+            : `${peers.length} device${peers.length === 1 ? '' : 's'} nearby`}
         </p>
+        {peers.length === 0 ? (
+          <p className="max-w-60 text-xs leading-relaxed text-text-faint">
+            Devices running Loom on this WiFi will appear here automatically.
+          </p>
+        ) : (
+          <ul className="w-72 space-y-1">
+            {peers.map((peer) => (
+              <li key={peer.loomId}>
+                <button
+                  type="button"
+                  onClick={() => onOpenChatWith(peer)}
+                  className="flex w-full items-center gap-2.5 rounded-xl border border-white/10 bg-surface-2/60 px-3 py-2.5 text-left transition hover:border-accent/40 hover:bg-surface-2"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-semibold text-text">
+                      {peer.displayName}
+                    </span>
+                    <span className="block truncate font-mono text-[10px] text-text-faint">
+                      {peer.loomId}
+                    </span>
+                  </span>
+                  {peer.paired && (
+                    <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-400">
+                      Paired
+                    </span>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <button
+          type="button"
+          onClick={onOpenPairing}
+          className="mt-1 flex items-center gap-2 rounded-lg bg-linear-to-br from-accent to-accent-blue px-4 py-2 text-xs font-semibold text-white shadow-[0_0_14px_rgba(124,92,255,0.35)] transition hover:brightness-110 active:scale-[0.98]"
+        >
+          <QrCode size={14} />
+          Scan to pair
+        </button>
       </motion.div>
     </div>
   )
@@ -102,6 +154,8 @@ function Shell({
   const [store, setStore] = useState<ConversationStore | null>(null)
   const [tab, setTab] = useState<SidebarTab>('chats')
   const [profileOpen, setProfileOpen] = useState(false)
+  const [pairingOpen, setPairingOpen] = useState(false)
+  const nearbyPeers = useLanPeers()
 
   useEffect(() => {
     void cleanupLegacyDatabases()
@@ -111,16 +165,40 @@ function Shell({
     return () => instance.destroy()
   }, [])
 
+  useEffect(() => {
+    pushToRust()
+    if (!isTauri()) return
+    void invoke('set_discovery_identity', {
+      loomId: identity.loomId,
+      displayName: identity.displayName,
+    }).catch((err) => console.warn('[lan] identity push failed:', err))
+  }, [identity.loomId, identity.displayName])
+
+  useEffect(() => {
+    if (!store) return
+    void initLanSync(identity, store)
+  }, [store, identity])
+
   const { chats, activeId, activeConversation, select, createChat, createGroup, deleteChat } =
     useConversations(store, identity)
 
   if (!store) return null
+
+  const openChatWith = async (peer: { loomId: string; displayName: string }) => {
+    const id = await store.ensureDirectConversation(
+      { loomId: identity.loomId, displayName: identity.displayName },
+      peer,
+    )
+    select(id)
+    setTab('chats')
+  }
 
   return (
     <div className="flex h-full overflow-hidden bg-bg text-text">
       <Sidebar
         tab={tab}
         chats={chats}
+        nearbyPeers={nearbyPeers}
         activeId={activeId}
         identity={identity}
         onTabChange={setTab}
@@ -132,12 +210,18 @@ function Shell({
         onCreateGroup={createGroup}
         onDelete={deleteChat}
         onOpenProfile={() => setProfileOpen(true)}
+        onOpenPairing={() => setPairingOpen(true)}
+        onOpenChatWith={(peer) => void openChatWith(peer)}
       />
       <main className="relative min-w-0 flex-1">
         <StaticWashes />
         <div className="relative z-10 flex h-full">
           {tab === 'nearby' ? (
-            <NearbyPlaceholder />
+            <NearbyView
+              peers={nearbyPeers}
+              onOpenPairing={() => setPairingOpen(true)}
+              onOpenChatWith={(peer) => void openChatWith(peer)}
+            />
           ) : activeConversation ? (
             <ChatView
               key={activeConversation.id}
@@ -159,7 +243,14 @@ function Shell({
           onClose={() => setProfileOpen(false)}
           onRename={rename}
           onAvatarChange={setAvatar}
+          onOpenPairing={() => {
+            setProfileOpen(false)
+            setPairingOpen(true)
+          }}
         />
+      )}
+      {pairingOpen && (
+        <QrPairModal identity={identity} onClose={() => setPairingOpen(false)} />
       )}
     </div>
   )

@@ -1,8 +1,9 @@
 import { Fragment } from 'react'
 import { motion } from 'framer-motion'
-import { MessageSquarePlus, Trash2, Users } from 'lucide-react'
+import { MessageSquarePlus, QrCode, Trash2, Users } from 'lucide-react'
 import type { ConversationSummary } from '../crdt/conversationStore'
 import type { Identity } from '../identity/identity'
+import type { LanPeer } from '../hooks/useLanPeers'
 import { Avatar } from './Avatar'
 
 export type SidebarTab = 'chats' | 'nearby'
@@ -10,6 +11,7 @@ export type SidebarTab = 'chats' | 'nearby'
 interface SidebarProps {
   tab: SidebarTab
   chats: ConversationSummary[]
+  nearbyPeers: LanPeer[]
   activeId: string | null
   identity: Identity
   onTabChange: (tab: SidebarTab) => void
@@ -18,6 +20,8 @@ interface SidebarProps {
   onCreateGroup: () => void
   onDelete: (id: string) => void
   onOpenProfile: () => void
+  onOpenPairing: () => void
+  onOpenChatWith: (peer: { loomId: string; displayName: string }) => void
 }
 
 function formatRelative(timestamp: number): string {
@@ -34,6 +38,7 @@ const TABS: SidebarTab[] = ['chats', 'nearby']
 export function Sidebar({
   tab,
   chats,
+  nearbyPeers,
   activeId,
   identity,
   onTabChange,
@@ -42,6 +47,8 @@ export function Sidebar({
   onCreateGroup,
   onDelete,
   onOpenProfile,
+  onOpenPairing,
+  onOpenChatWith,
 }: SidebarProps) {
   return (
     <aside className="relative flex w-80 shrink-0 flex-col border-r border-border bg-surface/80 backdrop-blur-xl">
@@ -161,13 +168,58 @@ export function Sidebar({
           })}
         </ul>
       ) : (
-        <div className="flex flex-1 items-center justify-center px-6 text-center">
-          <p className="text-xs leading-relaxed text-text-faint">
-            Devices on your network will appear here once discovery lands.
-          </p>
+        <div className="flex flex-1 flex-col overflow-y-auto p-2">
+          {nearbyPeers.length === 0 ? (
+            <div className="flex flex-1 items-center justify-center px-6 text-center">
+              <p className="text-xs leading-relaxed text-text-faint">
+                Searching your network… devices running Loom will appear here.
+              </p>
+            </div>
+          ) : (
+            <ul className="space-y-0.5">
+              {nearbyPeers.map((peer) => (
+                <motion.li key={peer.loomId} layout whileHover={{ x: 2 }}>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => onOpenChatWith(peer)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') onOpenChatWith(peer)
+                    }}
+                    className="group flex cursor-pointer items-center gap-2.5 rounded-xl border border-transparent px-3 py-2.5 transition-all duration-150 hover:bg-surface-2/70"
+                  >
+                    <Avatar name={peer.displayName || '?'} size="sm" variant="direct" />
+                    <div className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-semibold leading-snug text-text">
+                        {peer.displayName}
+                      </span>
+                      <span className="block truncate font-mono text-[10px] text-text-faint">
+                        {peer.loomId}
+                      </span>
+                    </div>
+                    {peer.paired && (
+                      <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-400">
+                        Paired
+                      </span>
+                    )}
+                  </div>
+                </motion.li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       <footer className="space-y-0.5 border-t border-border p-2">
+        {tab === 'nearby' && (
+          <button
+            type="button"
+            onClick={onOpenPairing}
+            className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-accent-blue transition hover:bg-surface-2/70 hover:text-text"
+          >
+            <QrCode size={15} />
+            Scan to pair
+          </button>
+        )}
         <button
           type="button"
           onClick={onCreateChat}

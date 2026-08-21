@@ -24,6 +24,19 @@ export interface SelfInfo {
   displayName: string
 }
 
+// Deterministic 1-1 conversation id — both peers derive the same value from their
+// Loom IDs, so either side can materialize the chat without coordination.
+export async function deriveDirectConversationId(a: string, b: string): Promise<string> {
+  const [x, y] = [a, b].sort()
+  const digest = new Uint8Array(
+    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${x}|${y}`)),
+  )
+  const hex = Array.from(digest.slice(0, 16))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+  return `direct-${hex}`
+}
+
 export class ConversationStore {
   readonly doc: Y.Doc
   readonly conversations: Y.Map<ConversationMeta>
@@ -93,6 +106,29 @@ export class ConversationStore {
     return conversation
   }
 
+  async ensureDirectConversation(
+    self: SelfInfo,
+    peer: { loomId: string; displayName: string },
+  ): Promise<string> {
+    const id = await deriveDirectConversationId(self.loomId, peer.loomId)
+    if (!this.conversations.has(id)) {
+      const now = Date.now()
+      this.conversations.set(id, {
+        name: peer.displayName,
+        isGroup: false,
+        lastMessagePreview: '',
+        lastMessageAt: now,
+        createdAt: now,
+        unread: 0,
+      })
+      const conversation = this.getConversation(id)
+      conversation.initializeMeta(peer.displayName, false)
+      conversation.ensureMember(self.loomId, self.displayName)
+      conversation.ensureMember(peer.loomId, peer.displayName)
+    }
+    return id
+  }
+
   setActiveConversation(id: string | null): void {
     this.activeId = id
     if (!id) return
@@ -145,14 +181,24 @@ export class ConversationStore {
     const conversation = this.loadedConversations.get(id)
     const meta = this.conversations.get(id)
     if (!conversation || !meta) return
-    const fresh = conversation
-      .getSnapshot()
-      .messages.filter((message) => message.createdAt > this.startedAt).length
+    const messages = conversation.getSnapshot().messages
+    const fresh = messages.filter((message) => message.createdAt > this.startedAt).length
     const previous = this.freshCounts.get(id) ?? 0
     this.freshCounts.set(id, fresh)
-    if (fresh > previous && id !== this.activeId) {
-      this.conversations.set(id, { ...meta, unread: meta.unread + (fresh - previous) })
+    // LAN-applied messages land through the same activity hook, so keep the sidebar
+    // preview/unread in sync here rather than at each transport call site.
+    let patch: Partial<ConversationMeta> | null = null
+    const latest = messages[messages.length - 1]
+    if (latest && latest.createdAt > meta.lastMessageAt) {
+      patch = {
+        lastMessageAt: latest.createdAt,
+        lastMessagePreview: latest.type === 'image' ? 'Photo' : latest.content.slice(0, 60),
+      }
     }
+    if (fresh > previous && id !== this.activeId) {
+      patch = { ...(patch ?? {}), unread: meta.unread + (fresh - previous) }
+    }
+    if (patch) this.conversations.set(id, { ...meta, ...patch })
   }
 
   private refreshSnapshot(): void {

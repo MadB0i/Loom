@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Check, Copy, X } from 'lucide-react'
+import { Check, Copy, QrCode, X } from 'lucide-react'
 import type { Identity } from '../identity/identity'
 import { Avatar } from './Avatar'
 
@@ -9,9 +9,16 @@ interface ProfileModalProps {
   onClose: () => void
   onRename: (name: string) => Promise<void>
   onAvatarChange: (file: File) => Promise<void>
+  onOpenPairing: () => void
 }
 
-export function ProfileModal({ identity, onClose, onRename, onAvatarChange }: ProfileModalProps) {
+export function ProfileModal({
+  identity,
+  onClose,
+  onRename,
+  onAvatarChange,
+  onOpenPairing,
+}: ProfileModalProps) {
   const [name, setName] = useState(identity.displayName)
   const [copied, setCopied] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -137,9 +144,17 @@ export function ProfileModal({ identity, onClose, onRename, onAvatarChange }: Pr
         </div>
         <button
           type="button"
+          onClick={onOpenPairing}
+          className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-accent/40 bg-accent/10 px-4 py-2 text-xs font-semibold text-text transition hover:bg-accent/20 active:scale-[0.98]"
+        >
+          <QrCode size={14} />
+          Pair with a device
+        </button>
+        <button
+          type="button"
           onClick={() => void save()}
           disabled={!name.trim() || name.trim() === identity.displayName || saving}
-          className="mt-4 w-full rounded-lg bg-linear-to-br from-accent to-accent-blue px-4 py-2 text-xs font-semibold text-white shadow-[0_0_14px_rgba(124,92,255,0.35)] transition enabled:hover:brightness-110 enabled:active:scale-[0.98] disabled:opacity-40"
+          className="mt-2 w-full rounded-lg bg-linear-to-br from-accent to-accent-blue px-4 py-2 text-xs font-semibold text-white shadow-[0_0_14px_rgba(124,92,255,0.35)] transition enabled:hover:brightness-110 enabled:active:scale-[0.98] disabled:opacity-40"
         >
           Save name
         </button>
